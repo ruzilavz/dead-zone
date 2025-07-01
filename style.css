@@ -78,3 +78,9 @@ canvas {
   color: white;
   cursor: pointer;
 }
+
+#upgrade-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+}
