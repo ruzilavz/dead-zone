@@ -42,6 +42,11 @@ background.beginFill(0x555555);
 background.drawRect(0, 0, worldWidth, worldHeight);
 background.endFill();
 world.addChild(background);
+// видимая граница мира
+const border = new PIXI.Graphics();
+border.lineStyle(8, 0x222222);
+border.drawRect(0, 0, worldWidth, worldHeight);
+world.addChild(border);
 
 const player = new PIXI.Container();
 const playerBody = new PIXI.Graphics();
@@ -49,6 +54,38 @@ playerBody.beginFill(0x00ff00);
 playerBody.drawCircle(0, 0, 20);
 playerBody.endFill();
 player.addChild(playerBody);
+// ноги
+const leftLeg = new PIXI.Graphics();
+leftLeg.beginFill(0x00aa00);
+leftLeg.drawRect(-12, 20, 6, 14);
+leftLeg.endFill();
+const rightLeg = new PIXI.Graphics();
+rightLeg.beginFill(0x00aa00);
+rightLeg.drawRect(6, 20, 6, 14);
+rightLeg.endFill();
+player.addChild(leftLeg);
+player.addChild(rightLeg);
+// руки
+const leftArm = new PIXI.Graphics();
+leftArm.beginFill(0x00aa00);
+leftArm.drawRect(-26, -8, 8, 14);
+leftArm.endFill();
+const rightArm = new PIXI.Graphics();
+rightArm.beginFill(0x00aa00);
+rightArm.drawRect(18, -8, 8, 14);
+rightArm.endFill();
+player.addChild(leftArm);
+player.addChild(rightArm);
+// пистолет
+const gunLength = 20;
+const gun = new PIXI.Graphics();
+gun.beginFill(0x777777);
+gun.drawRect(0, -3, gunLength, 6);
+gun.endFill();
+gun.pivot.set(0, 0);
+player.addChild(gun);
+player.gun = gun;
+player.gunLength = gunLength;
 // полоска здоровья игрока
 const playerBarBg = new PIXI.Graphics();
 playerBarBg.beginFill(0x000000);
@@ -69,6 +106,8 @@ world.addChild(player);
 let target = { x: player.x, y: player.y };
 let enemies = [];
 let bullets = [];
+const SHOOT_RADIUS = 300;
+let squads = [];
 
 function shootBullet() {
     if (enemies.length === 0) return;
@@ -84,14 +123,14 @@ function shootBullet() {
     const dirX = nearest.x - player.x;
     const dirY = nearest.y - player.y;
     const dist = Math.sqrt(dirX * dirX + dirY * dirY);
-    if (dist === 0) return;
+    if (dist === 0 || dist > SHOOT_RADIUS) return;
 
     const bullet = new PIXI.Graphics();
     bullet.beginFill(0xffff00);
     bullet.drawCircle(0, 0, 5);
     bullet.endFill();
-    bullet.x = player.x;
-    bullet.y = player.y;
+    bullet.x = player.x + Math.cos(player.gun.rotation) * player.gunLength;
+    bullet.y = player.y + Math.sin(player.gun.rotation) * player.gunLength;
     const speed = 8;
     bullet.vx = dirX / dist * speed;
     bullet.vy = dirY / dist * speed;
@@ -105,17 +144,51 @@ setInterval(() => {
 }, 500);
 
 // === Спавн врагов ===
-function spawnEnemy() {
+function createEnemy() {
     const enemy = new PIXI.Container();
     const body = new PIXI.Graphics();
     body.beginFill(0xff0000);
     body.drawCircle(0, 0, 18);
     body.endFill();
     enemy.addChild(body);
-    enemy.x = Math.random() * worldWidth;
-    enemy.y = Math.random() * worldHeight;
+    // глаза
+    const eye1 = new PIXI.Graphics();
+    eye1.beginFill(0xffffff);
+    eye1.drawCircle(-6, -6, 4);
+    eye1.endFill();
+    const eye2 = new PIXI.Graphics();
+    eye2.beginFill(0xffffff);
+    eye2.drawCircle(6, -6, 4);
+    eye2.endFill();
+    const pupil1 = new PIXI.Graphics();
+    pupil1.beginFill(0x000000);
+    pupil1.drawCircle(-6, -6, 2);
+    pupil1.endFill();
+    const pupil2 = new PIXI.Graphics();
+    pupil2.beginFill(0x000000);
+    pupil2.drawCircle(6, -6, 2);
+    pupil2.endFill();
+    enemy.addChild(eye1, eye2, pupil1, pupil2);
+    // руки и ноги
+    const leftArm = new PIXI.Graphics();
+    leftArm.beginFill(0xaa0000);
+    leftArm.drawRect(-26, -4, 8, 12);
+    leftArm.endFill();
+    const rightArm = new PIXI.Graphics();
+    rightArm.beginFill(0xaa0000);
+    rightArm.drawRect(18, -4, 8, 12);
+    rightArm.endFill();
+    const leftLeg = new PIXI.Graphics();
+    leftLeg.beginFill(0xaa0000);
+    leftLeg.drawRect(-12, 18, 6, 14);
+    leftLeg.endFill();
+    const rightLeg = new PIXI.Graphics();
+    rightLeg.beginFill(0xaa0000);
+    rightLeg.drawRect(6, 18, 6, 14);
+    rightLeg.endFill();
+    enemy.addChild(leftArm, rightArm, leftLeg, rightLeg);
+
     enemy.hp = 10;
-    // полоска здоровья
     const barBg = new PIXI.Graphics();
     barBg.beginFill(0x000000);
     barBg.drawRect(-18, -30, 36, 4);
@@ -127,14 +200,35 @@ function spawnEnemy() {
     enemy.addChild(barBg);
     enemy.addChild(bar);
     enemy.hpBar = bar;
+    return enemy;
+}
 
-    world.addChild(enemy);
-    enemies.push(enemy);
+function spawnEnemyGroup() {
+    const count = Math.floor(Math.random() * 3) + 1;
+    const side = Math.floor(Math.random() * 4);
+    let x = 0, y = 0;
+    if (side === 0) { x = Math.random() * worldWidth; y = 0; }
+    else if (side === 1) { x = Math.random() * worldWidth; y = worldHeight; }
+    else if (side === 2) { x = 0; y = Math.random() * worldHeight; }
+    else { x = worldWidth; y = Math.random() * worldHeight; }
+    const squad = { x, y, members: [] };
+    for (let i = 0; i < count; i++) {
+        const enemy = createEnemy();
+        enemy.offsetX = (Math.random() - 0.5) * 40;
+        enemy.offsetY = (Math.random() - 0.5) * 40;
+        enemy.x = x + enemy.offsetX;
+        enemy.y = y + enemy.offsetY;
+        enemy.squad = squad;
+        squad.members.push(enemy);
+        world.addChild(enemy);
+        enemies.push(enemy);
+    }
+    squads.push(squad);
 }
 
 setInterval(() => {
-    if (gameStarted && !gameOver && enemies.length < 50) spawnEnemy();
-}, 2000);
+    if (gameStarted && !gameOver && enemies.length < 200) spawnEnemyGroup();
+}, 1500);
 
 // === Управление ===
 app.stage.interactive = true;
@@ -159,6 +253,19 @@ function getWorldPos(screenPos) {
 // === Основной цикл ===
 app.ticker.add(() => {
     if (!gameStarted || gameOver) return;
+
+    // авто-наведение пистолета на ближайшего зомби
+    if (enemies.length > 0) {
+        let nearest = enemies[0];
+        let minDist = Infinity;
+        for (let e of enemies) {
+            const dx = e.x - player.x;
+            const dy = e.y - player.y;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d < minDist) { minDist = d; nearest = e; }
+        }
+        player.gun.rotation = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+    }
 
     // Движение игрока
     const dx = target.x - player.x;
@@ -211,36 +318,41 @@ app.ticker.add(() => {
         }
     }
 
-    // Враги идут к игроку
-    for (let enemy of enemies) {
-        enemy.visible = enemy.x > minX && enemy.x < maxX && enemy.y > minY && enemy.y < maxY;
-
-        const edx = player.x - enemy.x;
-        const edy = player.y - enemy.y;
-        const edist = Math.sqrt(edx * edx + edy * edy);
-        if (edist > 1) {
+    // Враги идут к игроку группами
+    for (let squad of squads) {
+        const sdx = player.x - squad.x;
+        const sdy = player.y - squad.y;
+        const sdist = Math.sqrt(sdx * sdx + sdy * sdy);
+        if (sdist > 1) {
             const enemySpeed = 1.5;
-            enemy.x += edx / edist * enemySpeed;
-            enemy.y += edy / edist * enemySpeed;
+            squad.x += sdx / sdist * enemySpeed;
+            squad.y += sdy / sdist * enemySpeed;
         }
+        for (let enemy of squad.members) {
+            enemy.x = squad.x + enemy.offsetX;
+            enemy.y = squad.y + enemy.offsetY;
+            enemy.visible = enemy.x > minX && enemy.x < maxX && enemy.y > minY && enemy.y < maxY;
 
-        // Столкновение с игроком
-        const pdx = enemy.x - player.x;
-        const pdy = enemy.y - player.y;
-        if (Math.sqrt(pdx * pdx + pdy * pdy) < 40) {
-            const now = performance.now();
-            if (!player.lastHit || now - player.lastHit > 500) {
-                player.hp -= 5;
-                player.lastHit = now;
+            // Столкновение с игроком
+            const pdx = enemy.x - player.x;
+            const pdy = enemy.y - player.y;
+            if (Math.sqrt(pdx * pdx + pdy * pdy) < 40) {
+                const now = performance.now();
+                if (!player.lastHit || now - player.lastHit > 500) {
+                    player.hp -= 5;
+                    player.lastHit = now;
+                }
+            }
+
+            // смерть врага
+            if (enemy.hp <= 0) {
+                world.removeChild(enemy);
+                enemies.splice(enemies.indexOf(enemy), 1);
+                squad.members.splice(squad.members.indexOf(enemy), 1);
             }
         }
-
-        // смерть врага
-        if (enemy.hp <= 0) {
-            world.removeChild(enemy);
-            enemies.splice(enemies.indexOf(enemy), 1);
-        }
     }
+    squads = squads.filter(s => s.members.length > 0);
 
     if (player.hp <= 0) {
         showEndScreen();
@@ -261,6 +373,7 @@ function startGame() {
     enemies = [];
     for (let b of bullets) world.removeChild(b);
     bullets = [];
+    squads = [];
 
-    spawnEnemy();
+    spawnEnemyGroup();
 }
