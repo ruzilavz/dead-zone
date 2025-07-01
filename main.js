@@ -16,9 +16,9 @@ let gamePaused = false;
 let fireRate = 500; // мс между выстрелами
 let bulletDamage = 10;
 let bulletCount = 1;
+let nextUpgradeKill = 50;
 let killCount = 0;
 let coinCount = 0;
-let upgradeShown = false;
 
 const startBtn = document.getElementById('startBtn');
 const restartBtn = document.getElementById('restartBtn');
@@ -28,6 +28,8 @@ const upgradePopup = document.getElementById('upgrade-popup');
 const rateBtn = document.getElementById('rateUpgrade');
 const damageBtn = document.getElementById('damageUpgrade');
 const countBtn = document.getElementById('countUpgrade');
+const hpBtn = document.getElementById('hpUpgrade');
+const secondGunBtn = document.getElementById('secondGunUpgrade');
 
 startBtn.onclick = () => {
     document.getElementById('ui').style.display = 'none';
@@ -62,7 +64,25 @@ damageBtn.onclick = () => {
     hideUpgradePopup();
 };
 countBtn.onclick = () => {
-    bulletCount += 1;
+    bulletCount = Math.min(3, bulletCount + 1);
+    hideUpgradePopup();
+};
+hpBtn.onclick = () => {
+    player.maxHp += 10;
+    player.hp += 10;
+    hideUpgradePopup();
+};
+secondGunBtn.onclick = () => {
+    if (!player.secondGun) {
+        const gun2 = new PIXI.Graphics();
+        gun2.beginFill(0x777777);
+        gun2.drawRect(0, -3, gunLength, 6);
+        gun2.endFill();
+        gun2.pivot.set(0, 0);
+        gun2.position.set(-20, 0);
+        player.addChild(gun2);
+        player.secondGun = gun2;
+    }
     hideUpgradePopup();
 };
 
@@ -81,15 +101,16 @@ background.endFill();
 world.addChild(background);
 // сетка для лучшего ощущения движения
 const grid = new PIXI.Graphics();
-grid.lineStyle(1, 0x444444, 1);
-for (let x = 0; x <= worldWidth; x += 50) {
+grid.lineStyle(1, 0x444444, 0.6);
+for (let x = 0; x <= worldWidth; x += 25) {
     grid.moveTo(x, 0);
     grid.lineTo(x, worldHeight);
 }
-for (let y = 0; y <= worldHeight; y += 50) {
+for (let y = 0; y <= worldHeight; y += 25) {
     grid.moveTo(0, y);
     grid.lineTo(worldWidth, y);
 }
+grid.filters = [new PIXI.filters.BlurFilter(1.5)];
 world.addChild(grid);
 // видимая граница мира
 const border = new PIXI.Graphics();
@@ -168,17 +189,20 @@ player.addChild(playerBar);
 player.hpBar = playerBar;
 player.x = worldWidth / 2;
 player.y = worldHeight / 2;
-player.hp = 100;
+player.maxHp = 100;
+player.hp = player.maxHp;
+player.secondGun = null;
 world.addChild(player);
 
 let target = { x: player.x, y: player.y };
 let enemies = [];
 let bullets = [];
 let coins = [];
+let effects = [];
 const SHOOT_RADIUS = 300;
 let squads = [];
-const playerSpeed = 3;
-const enemySpeed = 1.2;
+const playerSpeed = 2;
+const enemySpeed = 1;
 
 function shootBullet() {
     if (enemies.length === 0) return;
@@ -196,23 +220,25 @@ function shootBullet() {
     const dist = Math.sqrt(dirX * dirX + dirY * dirY);
     if (dist === 0 || dist > SHOOT_RADIUS) return;
 
-    const gunOffset = player.gun.position.x + player.gunLength;
-    for (let i = 0; i < bulletCount; i++) {
-        const bullet = new PIXI.Graphics();
-        bullet.beginFill(0xffff00);
-        bullet.drawCircle(0, 0, 5);
-        bullet.endFill();
-        const angle = player.gun.rotation + (i - (bulletCount - 1) / 2) * 0.2;
-        bullet.x = player.x + Math.cos(angle) * gunOffset;
-        bullet.y = player.y + Math.sin(angle) * gunOffset;
-        const speed = 8;
-        const bdx = Math.cos(angle);
-        const bdy = Math.sin(angle);
-        bullet.vx = bdx * speed;
-        bullet.vy = bdy * speed;
-        bullet.damage = bulletDamage;
-        world.addChild(bullet);
-        bullets.push(bullet);
+    const guns = [player.gun];
+    if (player.secondGun) guns.push(player.secondGun);
+
+    for (let g of guns) {
+        for (let i = 0; i < bulletCount; i++) {
+            const bullet = new PIXI.Graphics();
+            bullet.beginFill(0xffff00);
+            bullet.drawCircle(0, 0, 5);
+            bullet.endFill();
+            const angle = g.rotation + (i - (bulletCount - 1) / 2) * 0.2;
+            bullet.x = player.x + g.position.x + Math.cos(angle) * player.gunLength;
+            bullet.y = player.y + g.position.y + Math.sin(angle) * player.gunLength;
+            const speed = 8;
+            bullet.vx = Math.cos(angle) * speed;
+            bullet.vy = Math.sin(angle) * speed;
+            bullet.damage = bulletDamage;
+            world.addChild(bullet);
+            bullets.push(bullet);
+        }
     }
 }
 
@@ -289,6 +315,17 @@ function spawnCoin(x, y) {
     coins.push(coin);
 }
 
+function spawnImpact(x, y) {
+    const impact = new PIXI.Graphics();
+    impact.beginFill(0xffffaa);
+    impact.drawCircle(0, 0, 10);
+    impact.endFill();
+    impact.x = x;
+    impact.y = y;
+    world.addChild(impact);
+    effects.push({ sprite: impact, life: 15 });
+}
+
 function spawnEnemyGroup() {
     const count = Math.floor(Math.random() * 3) + 1;
     const side = Math.floor(Math.random() * 4);
@@ -348,7 +385,9 @@ app.ticker.add(() => {
             const d = Math.sqrt(dx * dx + dy * dy);
             if (d < minDist) { minDist = d; nearest = e; }
         }
-        player.gun.rotation = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+        const targetAngle = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+        player.gun.rotation = targetAngle;
+        if (player.secondGun) player.secondGun.rotation = targetAngle;
     }
 
     const now = performance.now();
@@ -367,7 +406,7 @@ app.ticker.add(() => {
     }
 
     // Обновляем полоску здоровья игрока
-    player.hpBar.scale.x = player.hp / 100;
+    player.hpBar.scale.x = player.hp / player.maxHp;
 
     // Камера
     world.x = -player.x + app.screen.width / 2;
@@ -400,10 +439,21 @@ app.ticker.add(() => {
             if (Math.sqrt(bdx * bdx + bdy * bdy) < 20) {
                 enemy.hp -= b.damage;
                 enemy.hpBar.scale.x = Math.max(0, enemy.hp / 20);
+                spawnImpact(b.x, b.y);
                 world.removeChild(b);
                 bullets.splice(i, 1);
                 break;
             }
+        }
+    }
+
+    for (let i = effects.length - 1; i >= 0; i--) {
+        const ef = effects[i];
+        ef.life--;
+        ef.sprite.alpha = ef.life / 15;
+        if (ef.life <= 0) {
+            world.removeChild(ef.sprite);
+            effects.splice(i, 1);
         }
     }
 
@@ -449,8 +499,8 @@ app.ticker.add(() => {
             if (enemy.hp <= 0) {
                 spawnCoin(enemy.x, enemy.y);
                 killCount++;
-                if (killCount >= 50 && !upgradeShown) {
-                    upgradeShown = true;
+                if (killCount >= nextUpgradeKill && killCount <= 1000) {
+                    nextUpgradeKill += 10;
                     showUpgradePopup();
                 }
                 world.removeChild(enemy);
@@ -476,13 +526,18 @@ function startGame() {
     bulletCount = 1;
     killCount = 0;
     coinCount = 0;
-    upgradeShown = false;
+    nextUpgradeKill = 50;
     coinCounterEl.textContent = 'Coins: 0';
     upgradePopup.style.display = 'none';
     lastShot = 0;
-    player.hp = 100;
+    player.maxHp = 100;
+    player.hp = player.maxHp;
     player.x = worldWidth / 2;
     player.y = worldHeight / 2;
+    if (player.secondGun) {
+        player.removeChild(player.secondGun);
+        player.secondGun = null;
+    }
     target = { x: player.x, y: player.y };
     player.hpBar.scale.x = 1;
 
@@ -492,6 +547,8 @@ function startGame() {
     bullets = [];
     for (let c of coins) world.removeChild(c);
     coins = [];
+    for (let ef of effects) world.removeChild(ef.sprite);
+    effects = [];
     squads = [];
 
     spawnEnemyGroup();
