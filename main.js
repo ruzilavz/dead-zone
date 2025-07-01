@@ -177,8 +177,8 @@ let bullets = [];
 let coins = [];
 const SHOOT_RADIUS = 300;
 let squads = [];
-const playerSpeed = 1.5;
-const enemySpeed = 0.6;
+const playerSpeed = 0.9;
+const enemySpeed = 0.2;
 
 function shootBullet() {
     if (enemies.length === 0) return;
