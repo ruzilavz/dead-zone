@@ -13,21 +13,33 @@ let gameOver = false;
 let gamePaused = false;
 
 // Апгрейды и счётчики
-let fireRate = 500; // мс между выстрелами
-let bulletDamage = 10;
-let bulletCount = 1;
+const upgrades = {
+    level: 1,
+    bulletCount: 1,
+    bulletSpeed: 8,
+    fireRate: 500, // мс между выстрелами
+    damage: 10,
+    maxHP: 100,
+    secondPistol: false
+};
 let killCount = 0;
 let coinCount = 0;
-let upgradeShown = false;
 
 const startBtn = document.getElementById('startBtn');
 const restartBtn = document.getElementById('restartBtn');
 const endScreen = document.getElementById('end-screen');
 const coinCounterEl = document.getElementById('coinCounter');
 const upgradePopup = document.getElementById('upgrade-popup');
-const rateBtn = document.getElementById('rateUpgrade');
-const damageBtn = document.getElementById('damageUpgrade');
-const countBtn = document.getElementById('countUpgrade');
+const upgradeButtons = document.getElementById('upgrade-buttons');
+
+const allUpgrades = [
+    { key: 'bulletCount', name: 'Количество пуль', desc: 'больше пуль за выстрел' },
+    { key: 'bulletSpeed', name: 'Скорость пуль', desc: 'пули летят быстрее' },
+    { key: 'fireRate', name: 'Скорострельность', desc: 'стрелять быстрее' },
+    { key: 'damage', name: 'Урон', desc: 'больше урона' },
+    { key: 'maxHP', name: 'Макс. здоровье', desc: '+10 к здоровью' },
+    { key: 'secondPistol', name: 'Второй пистолет', desc: 'пистолет во второй руке' }
+];
 
 startBtn.onclick = () => {
     document.getElementById('ui').style.display = 'none';
@@ -45,6 +57,22 @@ function showEndScreen() {
 
 function showUpgradePopup() {
     gamePaused = true;
+    upgradeButtons.innerHTML = '';
+    const available = allUpgrades.filter(u => u.key !== 'secondPistol' || !upgrades.secondPistol);
+    const opts = [];
+    const count = Math.min(4, available.length);
+    const arr = available.slice();
+    for (let i = 0; i < count; i++) {
+        const choice = arr.splice(Math.floor(Math.random() * arr.length), 1)[0];
+        opts.push(choice);
+    }
+    for (let opt of opts) {
+        const btn = document.createElement('button');
+        btn.className = 'upgrade-btn';
+        btn.innerHTML = `${opt.name}<br><small>${opt.desc}</small>`;
+        btn.onclick = () => { applyUpgrade(opt.key); hideUpgradePopup(); };
+        upgradeButtons.appendChild(btn);
+    }
     upgradePopup.style.display = 'flex';
 }
 
@@ -53,18 +81,38 @@ function hideUpgradePopup() {
     upgradePopup.style.display = 'none';
 }
 
-rateBtn.onclick = () => {
-    fireRate = Math.max(100, fireRate * 0.6);
-    hideUpgradePopup();
-};
-damageBtn.onclick = () => {
-    bulletDamage += 10;
-    hideUpgradePopup();
-};
-countBtn.onclick = () => {
-    bulletCount += 1;
-    hideUpgradePopup();
-};
+function applyUpgrade(key) {
+    switch (key) {
+        case 'bulletCount':
+            upgrades.bulletCount = Math.min(3, upgrades.bulletCount + 1);
+            break;
+        case 'bulletSpeed':
+            upgrades.bulletSpeed *= 1.15;
+            break;
+        case 'fireRate':
+            upgrades.fireRate = Math.max(50, upgrades.fireRate * 0.9);
+            break;
+        case 'damage':
+            upgrades.damage += 5;
+            break;
+        case 'maxHP':
+            upgrades.maxHP += 10;
+            player.hp += 10;
+            break;
+        case 'secondPistol':
+            if (!upgrades.secondPistol) {
+                upgrades.secondPistol = true;
+                const gun2 = new PIXI.Graphics();
+                gun2.beginFill(0x777777);
+                gun2.drawRect(0, -3, player.gunLength, 6);
+                gun2.endFill();
+                gun2.position.set(-20, 0);
+                player.addChild(gun2);
+                player.leftGun = gun2;
+            }
+            break;
+    }
+}
 
 // === Карта и игрок ===
 const worldWidth = 3000;
@@ -166,9 +214,19 @@ playerBar.endFill();
 player.addChild(playerBarBg);
 player.addChild(playerBar);
 player.hpBar = playerBar;
+const hpText = new PIXI.Text('100', {fontSize: 12, fill: 0xffffff});
+hpText.anchor.set(0.5);
+hpText.y = -38;
+player.addChild(hpText);
+player.hpText = hpText;
+const levelText = new PIXI.Text('Lv 1', {fontSize: 12, fill: 0xffffff});
+levelText.anchor.set(1, 0.5);
+levelText.position.set(-24, -31);
+player.addChild(levelText);
+player.levelText = levelText;
 player.x = worldWidth / 2;
 player.y = worldHeight / 2;
-player.hp = 100;
+player.hp = upgrades.maxHP;
 world.addChild(player);
 
 let target = { x: player.x, y: player.y };
@@ -196,23 +254,27 @@ function shootBullet() {
     const dist = Math.sqrt(dirX * dirX + dirY * dirY);
     if (dist === 0 || dist > SHOOT_RADIUS) return;
 
-    const gunOffset = player.gun.position.x + player.gunLength;
-    for (let i = 0; i < bulletCount; i++) {
-        const bullet = new PIXI.Graphics();
-        bullet.beginFill(0xffff00);
-        bullet.drawCircle(0, 0, 5);
-        bullet.endFill();
-        const angle = player.gun.rotation + (i - (bulletCount - 1) / 2) * 0.2;
-        bullet.x = player.x + Math.cos(angle) * gunOffset;
-        bullet.y = player.y + Math.sin(angle) * gunOffset;
-        const speed = 8;
-        const bdx = Math.cos(angle);
-        const bdy = Math.sin(angle);
-        bullet.vx = bdx * speed;
-        bullet.vy = bdy * speed;
-        bullet.damage = bulletDamage;
-        world.addChild(bullet);
-        bullets.push(bullet);
+    const guns = [player.gun];
+    if (upgrades.secondPistol && player.leftGun) guns.push(player.leftGun);
+    for (const g of guns) {
+        const gunOffset = g.position.x + player.gunLength;
+        for (let i = 0; i < upgrades.bulletCount; i++) {
+            const bullet = new PIXI.Graphics();
+            bullet.beginFill(0xffff00);
+            bullet.drawCircle(0, 0, 5);
+            bullet.endFill();
+            const angle = g.rotation + (i - (upgrades.bulletCount - 1) / 2) * 0.2;
+            bullet.x = player.x + Math.cos(angle) * gunOffset;
+            bullet.y = player.y + Math.sin(angle) * gunOffset;
+            const speed = upgrades.bulletSpeed;
+            const bdx = Math.cos(angle);
+            const bdy = Math.sin(angle);
+            bullet.vx = bdx * speed;
+            bullet.vy = bdy * speed;
+            bullet.damage = upgrades.damage;
+            world.addChild(bullet);
+            bullets.push(bullet);
+        }
     }
 }
 
@@ -263,7 +325,8 @@ function createEnemy() {
     rightLeg.endFill();
     enemy.addChild(leftArm, rightArm, leftLeg, rightLeg);
 
-    enemy.hp = 20;
+    enemy.maxHP = 20;
+    enemy.hp = enemy.maxHP;
     const barBg = new PIXI.Graphics();
     barBg.beginFill(0x000000);
     barBg.drawRect(-18, -30, 36, 4);
@@ -275,6 +338,11 @@ function createEnemy() {
     enemy.addChild(barBg);
     enemy.addChild(bar);
     enemy.hpBar = bar;
+    const hpText = new PIXI.Text(String(enemy.hp), {fontSize: 10, fill: 0xffffff});
+    hpText.anchor.set(0.5);
+    hpText.y = -32;
+    enemy.addChild(hpText);
+    enemy.hpText = hpText;
     return enemy;
 }
 
@@ -313,7 +381,7 @@ function spawnEnemyGroup() {
 }
 
 setInterval(() => {
-    if (gameStarted && !gameOver && enemies.length < 200) spawnEnemyGroup();
+    if (gameStarted && !gameOver && !gamePaused && enemies.length < 200) spawnEnemyGroup();
 }, 1500);
 
 // === Управление ===
@@ -348,11 +416,13 @@ app.ticker.add(() => {
             const d = Math.sqrt(dx * dx + dy * dy);
             if (d < minDist) { minDist = d; nearest = e; }
         }
-        player.gun.rotation = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+        const rot = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+        player.gun.rotation = rot;
+        if (player.leftGun) player.leftGun.rotation = rot;
     }
 
     const now = performance.now();
-    if (now - lastShot > fireRate) {
+    if (now - lastShot > upgrades.fireRate) {
         shootBullet();
         lastShot = now;
     }
@@ -366,8 +436,10 @@ app.ticker.add(() => {
         player.y += dy / dist * playerSpeed;
     }
 
-    // Обновляем полоску здоровья игрока
-    player.hpBar.scale.x = player.hp / 100;
+    // Обновляем полоску и текст здоровья игрока
+    player.hpBar.scale.x = player.hp / upgrades.maxHP;
+    player.hpText.text = Math.round(player.hp);
+    player.levelText.text = `Lv ${upgrades.level}`;
 
     // Камера
     world.x = -player.x + app.screen.width / 2;
@@ -399,7 +471,8 @@ app.ticker.add(() => {
             const bdy = enemy.y - b.y;
             if (Math.sqrt(bdx * bdx + bdy * bdy) < 20) {
                 enemy.hp -= b.damage;
-                enemy.hpBar.scale.x = Math.max(0, enemy.hp / 20);
+                enemy.hpBar.scale.x = Math.max(0, enemy.hp / enemy.maxHP);
+                enemy.hpText.text = Math.max(0, Math.round(enemy.hp));
                 world.removeChild(b);
                 bullets.splice(i, 1);
                 break;
@@ -449,8 +522,9 @@ app.ticker.add(() => {
             if (enemy.hp <= 0) {
                 spawnCoin(enemy.x, enemy.y);
                 killCount++;
-                if (killCount >= 50 && !upgradeShown) {
-                    upgradeShown = true;
+                const newLevel = Math.min(100, Math.floor(killCount / 50) + 1);
+                if (newLevel > upgrades.level && upgrades.level < 100) {
+                    upgrades.level = newLevel;
                     showUpgradePopup();
                 }
                 world.removeChild(enemy);
@@ -471,20 +545,26 @@ function startGame() {
     gameStarted = true;
     gameOver = false;
     gamePaused = false;
-    fireRate = 500;
-    bulletDamage = 10;
-    bulletCount = 1;
+    upgrades.level = 1;
+    upgrades.bulletCount = 1;
+    upgrades.bulletSpeed = 8;
+    upgrades.fireRate = 500;
+    upgrades.damage = 10;
+    upgrades.maxHP = 100;
+    upgrades.secondPistol = false;
     killCount = 0;
     coinCount = 0;
-    upgradeShown = false;
     coinCounterEl.textContent = 'Coins: 0';
     upgradePopup.style.display = 'none';
     lastShot = 0;
-    player.hp = 100;
+    player.hp = upgrades.maxHP;
+    if (player.leftGun) { player.removeChild(player.leftGun); player.leftGun = null; }
     player.x = worldWidth / 2;
     player.y = worldHeight / 2;
     target = { x: player.x, y: player.y };
     player.hpBar.scale.x = 1;
+    player.hpText.text = upgrades.maxHP;
+    player.levelText.text = `Lv ${upgrades.level}`;
 
     for (let e of enemies) world.removeChild(e);
     enemies = [];
