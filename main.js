@@ -42,6 +42,18 @@ background.beginFill(0x555555);
 background.drawRect(0, 0, worldWidth, worldHeight);
 background.endFill();
 world.addChild(background);
+// сетка для лучшего ощущения движения
+const grid = new PIXI.Graphics();
+grid.lineStyle(1, 0x444444, 1);
+for (let x = 0; x <= worldWidth; x += 100) {
+    grid.moveTo(x, 0);
+    grid.lineTo(x, worldHeight);
+}
+for (let y = 0; y <= worldHeight; y += 100) {
+    grid.moveTo(0, y);
+    grid.lineTo(worldWidth, y);
+}
+world.addChild(grid);
 // видимая граница мира
 const border = new PIXI.Graphics();
 border.lineStyle(8, 0x222222);
@@ -54,28 +66,46 @@ playerBody.beginFill(0x00ff00);
 playerBody.drawCircle(0, 0, 20);
 playerBody.endFill();
 player.addChild(playerBody);
-// ноги
+// ноги (круги)
 const leftLeg = new PIXI.Graphics();
 leftLeg.beginFill(0x00aa00);
-leftLeg.drawRect(-12, 20, 6, 14);
+leftLeg.drawCircle(-8, 24, 5);
 leftLeg.endFill();
 const rightLeg = new PIXI.Graphics();
 rightLeg.beginFill(0x00aa00);
-rightLeg.drawRect(6, 20, 6, 14);
+rightLeg.drawCircle(8, 24, 5);
 rightLeg.endFill();
 player.addChild(leftLeg);
 player.addChild(rightLeg);
-// руки
+// руки (круги)
 const leftArm = new PIXI.Graphics();
 leftArm.beginFill(0x00aa00);
-leftArm.drawRect(-26, -8, 8, 14);
+leftArm.drawCircle(-18, 0, 5);
 leftArm.endFill();
 const rightArm = new PIXI.Graphics();
 rightArm.beginFill(0x00aa00);
-rightArm.drawRect(18, -8, 8, 14);
+rightArm.drawCircle(18, 0, 5);
 rightArm.endFill();
 player.addChild(leftArm);
 player.addChild(rightArm);
+// глаза игрока
+const eye1 = new PIXI.Graphics();
+eye1.beginFill(0xffffff);
+eye1.drawCircle(-6, -6, 4);
+eye1.endFill();
+const eye2 = new PIXI.Graphics();
+eye2.beginFill(0xffffff);
+eye2.drawCircle(6, -6, 4);
+eye2.endFill();
+const pupil1 = new PIXI.Graphics();
+pupil1.beginFill(0x000000);
+pupil1.drawCircle(-6, -6, 2);
+pupil1.endFill();
+const pupil2 = new PIXI.Graphics();
+pupil2.beginFill(0x000000);
+pupil2.drawCircle(6, -6, 2);
+pupil2.endFill();
+player.addChild(eye1, eye2, pupil1, pupil2);
 // пистолет
 const gunLength = 20;
 const gun = new PIXI.Graphics();
@@ -83,6 +113,7 @@ gun.beginFill(0x777777);
 gun.drawRect(0, -3, gunLength, 6);
 gun.endFill();
 gun.pivot.set(0, 0);
+gun.position.set(20, 0); // держим в руках
 player.addChild(gun);
 player.gun = gun;
 player.gunLength = gunLength;
@@ -129,11 +160,15 @@ function shootBullet() {
     bullet.beginFill(0xffff00);
     bullet.drawCircle(0, 0, 5);
     bullet.endFill();
-    bullet.x = player.x + Math.cos(player.gun.rotation) * player.gunLength;
-    bullet.y = player.y + Math.sin(player.gun.rotation) * player.gunLength;
+    const gunOffset = player.gun.position.x + player.gunLength;
+    bullet.x = player.x + Math.cos(player.gun.rotation) * gunOffset;
+    bullet.y = player.y + Math.sin(player.gun.rotation) * gunOffset;
     const speed = 8;
-    bullet.vx = dirX / dist * speed;
-    bullet.vy = dirY / dist * speed;
+    const bdx = nearest.x - bullet.x;
+    const bdy = nearest.y - bullet.y;
+    const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
+    bullet.vx = bdx / bdist * speed;
+    bullet.vy = bdy / bdist * speed;
     bullet.target = nearest;
     world.addChild(bullet);
     bullets.push(bullet);
@@ -188,7 +223,7 @@ function createEnemy() {
     rightLeg.endFill();
     enemy.addChild(leftArm, rightArm, leftLeg, rightLeg);
 
-    enemy.hp = 10;
+    enemy.hp = 20;
     const barBg = new PIXI.Graphics();
     barBg.beginFill(0x000000);
     barBg.drawRect(-18, -30, 36, 4);
@@ -238,9 +273,7 @@ app.stage.on('pointerdown', (e) => {
 });
 app.stage.on('pointermove', (e) => {
     if (!gameStarted || gameOver) return;
-    if (e.data.buttons || e.data.originalEvent.touches) {
-        target = getWorldPos(e.data.global);
-    }
+    target = getWorldPos(e.data.global);
 });
 
 function getWorldPos(screenPos) {
@@ -310,7 +343,7 @@ app.ticker.add(() => {
             const bdy = enemy.y - b.y;
             if (Math.sqrt(bdx * bdx + bdy * bdy) < 20) {
                 enemy.hp -= 10;
-                enemy.hpBar.scale.x = Math.max(0, enemy.hp / 10);
+                enemy.hpBar.scale.x = Math.max(0, enemy.hp / 20);
                 world.removeChild(b);
                 bullets.splice(i, 1);
                 break;
