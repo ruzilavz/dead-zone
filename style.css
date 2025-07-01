@@ -40,3 +40,41 @@ canvas {
   display: none;
   pointer-events: none;
 }
+
+#coinCounter {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  color: white;
+  font-size: 20px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+#upgrade-popup {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  pointer-events: auto;
+  color: white;
+  text-align: center;
+}
+
+#upgrade-popup .upgrade-btn {
+  margin: 10px;
+  padding: 15px 30px;
+  font-size: 20px;
+  background: #222;
+  border: 2px solid #fff;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+}
