@@ -81,7 +81,7 @@ background.endFill();
 world.addChild(background);
 // сетка для лучшего ощущения движения
 const grid = new PIXI.Graphics();
-grid.lineStyle(1, 0x444444, 3);
+grid.lineStyle(1, 0x444444, 10);
 for (let x = 0; x <= worldWidth; x += 10) {
     grid.moveTo(x, 0);
     grid.lineTo(x, worldHeight);
