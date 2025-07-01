@@ -10,10 +10,24 @@ document.body.appendChild(app.view);
 // === Переменные интерфейса ===
 let gameStarted = false;
 let gameOver = false;
+let gamePaused = false;
+
+// Апгрейды и счётчики
+let fireRate = 500; // мс между выстрелами
+let bulletDamage = 10;
+let bulletCount = 1;
+let killCount = 0;
+let coinCount = 0;
+let upgradeShown = false;
 
 const startBtn = document.getElementById('startBtn');
 const restartBtn = document.getElementById('restartBtn');
 const endScreen = document.getElementById('end-screen');
+const coinCounterEl = document.getElementById('coinCounter');
+const upgradePopup = document.getElementById('upgrade-popup');
+const rateBtn = document.getElementById('rateUpgrade');
+const damageBtn = document.getElementById('damageUpgrade');
+const countBtn = document.getElementById('countUpgrade');
 
 startBtn.onclick = () => {
     document.getElementById('ui').style.display = 'none';
@@ -28,6 +42,29 @@ function showEndScreen() {
     gameOver = true;
     endScreen.style.display = 'block';
 }
+
+function showUpgradePopup() {
+    gamePaused = true;
+    upgradePopup.style.display = 'flex';
+}
+
+function hideUpgradePopup() {
+    gamePaused = false;
+    upgradePopup.style.display = 'none';
+}
+
+rateBtn.onclick = () => {
+    fireRate = Math.max(100, fireRate * 0.6);
+    hideUpgradePopup();
+};
+damageBtn.onclick = () => {
+    bulletDamage += 10;
+    hideUpgradePopup();
+};
+countBtn.onclick = () => {
+    bulletCount += 1;
+    hideUpgradePopup();
+};
 
 // === Карта и игрок ===
 const worldWidth = 3000;
@@ -45,11 +82,11 @@ world.addChild(background);
 // сетка для лучшего ощущения движения
 const grid = new PIXI.Graphics();
 grid.lineStyle(1, 0x444444, 1);
-for (let x = 0; x <= worldWidth; x += 100) {
+for (let x = 0; x <= worldWidth; x += 50) {
     grid.moveTo(x, 0);
     grid.lineTo(x, worldHeight);
 }
-for (let y = 0; y <= worldHeight; y += 100) {
+for (let y = 0; y <= worldHeight; y += 50) {
     grid.moveTo(0, y);
     grid.lineTo(worldWidth, y);
 }
@@ -137,8 +174,11 @@ world.addChild(player);
 let target = { x: player.x, y: player.y };
 let enemies = [];
 let bullets = [];
+let coins = [];
 const SHOOT_RADIUS = 300;
 let squads = [];
+const playerSpeed = 3;
+const enemySpeed = 1.2;
 
 function shootBullet() {
     if (enemies.length === 0) return;
@@ -156,27 +196,27 @@ function shootBullet() {
     const dist = Math.sqrt(dirX * dirX + dirY * dirY);
     if (dist === 0 || dist > SHOOT_RADIUS) return;
 
-    const bullet = new PIXI.Graphics();
-    bullet.beginFill(0xffff00);
-    bullet.drawCircle(0, 0, 5);
-    bullet.endFill();
     const gunOffset = player.gun.position.x + player.gunLength;
-    bullet.x = player.x + Math.cos(player.gun.rotation) * gunOffset;
-    bullet.y = player.y + Math.sin(player.gun.rotation) * gunOffset;
-    const speed = 8;
-    const bdx = nearest.x - bullet.x;
-    const bdy = nearest.y - bullet.y;
-    const bdist = Math.sqrt(bdx * bdx + bdy * bdy);
-    bullet.vx = bdx / bdist * speed;
-    bullet.vy = bdy / bdist * speed;
-    bullet.target = nearest;
-    world.addChild(bullet);
-    bullets.push(bullet);
+    for (let i = 0; i < bulletCount; i++) {
+        const bullet = new PIXI.Graphics();
+        bullet.beginFill(0xffff00);
+        bullet.drawCircle(0, 0, 5);
+        bullet.endFill();
+        const angle = player.gun.rotation + (i - (bulletCount - 1) / 2) * 0.2;
+        bullet.x = player.x + Math.cos(angle) * gunOffset;
+        bullet.y = player.y + Math.sin(angle) * gunOffset;
+        const speed = 8;
+        const bdx = Math.cos(angle);
+        const bdy = Math.sin(angle);
+        bullet.vx = bdx * speed;
+        bullet.vy = bdy * speed;
+        bullet.damage = bulletDamage;
+        world.addChild(bullet);
+        bullets.push(bullet);
+    }
 }
 
-setInterval(() => {
-    if (gameStarted && !gameOver) shootBullet();
-}, 500);
+let lastShot = 0;
 
 // === Спавн врагов ===
 function createEnemy() {
@@ -238,6 +278,17 @@ function createEnemy() {
     return enemy;
 }
 
+function spawnCoin(x, y) {
+    const coin = new PIXI.Graphics();
+    coin.beginFill(0xffd700);
+    coin.drawCircle(0, 0, 8);
+    coin.endFill();
+    coin.x = x;
+    coin.y = y;
+    world.addChild(coin);
+    coins.push(coin);
+}
+
 function spawnEnemyGroup() {
     const count = Math.floor(Math.random() * 3) + 1;
     const side = Math.floor(Math.random() * 4);
@@ -285,7 +336,7 @@ function getWorldPos(screenPos) {
 
 // === Основной цикл ===
 app.ticker.add(() => {
-    if (!gameStarted || gameOver) return;
+    if (!gameStarted || gameOver || gamePaused) return;
 
     // авто-наведение пистолета на ближайшего зомби
     if (enemies.length > 0) {
@@ -300,14 +351,19 @@ app.ticker.add(() => {
         player.gun.rotation = Math.atan2(nearest.y - player.y, nearest.x - player.x);
     }
 
+    const now = performance.now();
+    if (now - lastShot > fireRate) {
+        shootBullet();
+        lastShot = now;
+    }
+
     // Движение игрока
     const dx = target.x - player.x;
     const dy = target.y - player.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const speed = 4;
     if (dist > 1) {
-        player.x += dx / dist * speed;
-        player.y += dy / dist * speed;
+        player.x += dx / dist * playerSpeed;
+        player.y += dy / dist * playerSpeed;
     }
 
     // Обновляем полоску здоровья игрока
@@ -342,12 +398,25 @@ app.ticker.add(() => {
             const bdx = enemy.x - b.x;
             const bdy = enemy.y - b.y;
             if (Math.sqrt(bdx * bdx + bdy * bdy) < 20) {
-                enemy.hp -= 10;
+                enemy.hp -= b.damage;
                 enemy.hpBar.scale.x = Math.max(0, enemy.hp / 20);
                 world.removeChild(b);
                 bullets.splice(i, 1);
                 break;
             }
+        }
+    }
+
+    // Монеты
+    for (let i = coins.length - 1; i >= 0; i--) {
+        const c = coins[i];
+        const cdx = c.x - player.x;
+        const cdy = c.y - player.y;
+        if (Math.sqrt(cdx * cdx + cdy * cdy) < 25) {
+            world.removeChild(c);
+            coins.splice(i, 1);
+            coinCount++;
+            coinCounterEl.textContent = `Coins: ${coinCount}`;
         }
     }
 
@@ -357,7 +426,6 @@ app.ticker.add(() => {
         const sdy = player.y - squad.y;
         const sdist = Math.sqrt(sdx * sdx + sdy * sdy);
         if (sdist > 1) {
-            const enemySpeed = 1.5;
             squad.x += sdx / sdist * enemySpeed;
             squad.y += sdy / sdist * enemySpeed;
         }
@@ -379,6 +447,12 @@ app.ticker.add(() => {
 
             // смерть врага
             if (enemy.hp <= 0) {
+                spawnCoin(enemy.x, enemy.y);
+                killCount++;
+                if (killCount >= 50 && !upgradeShown) {
+                    upgradeShown = true;
+                    showUpgradePopup();
+                }
                 world.removeChild(enemy);
                 enemies.splice(enemies.indexOf(enemy), 1);
                 squad.members.splice(squad.members.indexOf(enemy), 1);
@@ -396,6 +470,16 @@ app.ticker.add(() => {
 function startGame() {
     gameStarted = true;
     gameOver = false;
+    gamePaused = false;
+    fireRate = 500;
+    bulletDamage = 10;
+    bulletCount = 1;
+    killCount = 0;
+    coinCount = 0;
+    upgradeShown = false;
+    coinCounterEl.textContent = 'Coins: 0';
+    upgradePopup.style.display = 'none';
+    lastShot = 0;
     player.hp = 100;
     player.x = worldWidth / 2;
     player.y = worldHeight / 2;
@@ -406,6 +490,8 @@ function startGame() {
     enemies = [];
     for (let b of bullets) world.removeChild(b);
     bullets = [];
+    for (let c of coins) world.removeChild(c);
+    coins = [];
     squads = [];
 
     spawnEnemyGroup();
