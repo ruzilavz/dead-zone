@@ -81,8 +81,8 @@ background.endFill();
 world.addChild(background);
 // сетка для лучшего ощущения движения
 const grid = new PIXI.Graphics();
-grid.lineStyle(1, 0x444444, 1);
-for (let x = 0; x <= worldWidth; x += 50) {
+grid.lineStyle(1, 0x444444, 3);
+for (let x = 0; x <= worldWidth; x += 25) {
     grid.moveTo(x, 0);
     grid.lineTo(x, worldHeight);
 }
@@ -177,8 +177,8 @@ let bullets = [];
 let coins = [];
 const SHOOT_RADIUS = 300;
 let squads = [];
-const playerSpeed = 3;
-const enemySpeed = 1.2;
+const playerSpeed = 1.5;
+const enemySpeed = 0.6;
 
 function shootBullet() {
     if (enemies.length === 0) return;
