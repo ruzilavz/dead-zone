@@ -86,7 +86,7 @@ for (let x = 0; x <= worldWidth; x += 10) {
     grid.moveTo(x, 0);
     grid.lineTo(x, worldHeight);
 }
-for (let y = 0; y <= worldHeight; y += 50) {
+for (let y = 0; y <= worldHeight; y += 10) {
     grid.moveTo(0, y);
     grid.lineTo(worldWidth, y);
 }
