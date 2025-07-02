@@ -1,326 +1,578 @@
+
 // === Инициализация PIXI ===
 const app = new PIXI.Application({
     width: window.innerWidth,
     height: window.innerHeight,
-    backgroundColor: 0x1e1e1e,
-    antialias: true,
+    backgroundColor: 0x1e1e1e
 });
 document.body.appendChild(app.view);
 
-// === Константы и конфигурация ===
-const CONFIG = {
-    WORLD_WIDTH: 3000,
-    WORLD_HEIGHT: 3000,
-    PLAYER_SPEED: 4,
-    PLAYER_HEALTH: 100,
-    ENEMY_SPEED: 1.8,
-    ENEMY_HEALTH: 10,
-    BULLET_SPEED: 8,
-    MAX_ENEMIES_BASE: 10,
-    ENEMIES_PER_SCORE_TIER: 5,
+// === Переменные интерфейса ===
+let gameStarted = false;
+let gameOver = false;
+let gamePaused = false;
+
+// Апгрейды и счётчики
+const upgrades = {
+    level: 1,
+    bulletCount: 1,
+    bulletSpeed: 8,
+    fireRate: 500, // мс между выстрелами
+    damage: 10,
+    maxHP: 100,
+    secondPistol: false
 };
+let killCount = 0;
+let coinCount = 0;
 
-// === Переменные состояния игры ===
-let player, world, backgroundGrid;
-let enemies = [];
-let bullets = [];
-let score = 0;
-let time = 0; // Переменная для анимаций, основанных на времени
-let gameIsOver = true;
-
-// === Элементы интерфейса ===
-const hud = document.getElementById('hud');
-const scoreDisplay = document.getElementById('score');
-const healthBar = document.getElementById('health-bar');
-const startScreen = document.getElementById('start-screen');
-const endScreen = document.getElementById('end-screen');
 const startBtn = document.getElementById('startBtn');
 const restartBtn = document.getElementById('restartBtn');
-const finalScoreDisplay = document.getElementById('final-score');
+const endScreen = document.getElementById('end-screen');
+const coinCounterEl = document.getElementById('coinCounter');
+const upgradePopup = document.getElementById('upgrade-popup');
+const upgradeButtons = document.getElementById('upgrade-buttons');
 
-// === Классы ===
+const allUpgrades = [
+    { key: 'bulletCount', name: 'Количество пуль', desc: 'больше пуль за выстрел' },
+    { key: 'bulletSpeed', name: 'Скорость пуль', desc: 'пули летят быстрее' },
+    { key: 'fireRate', name: 'Скорострельность', desc: 'стрелять быстрее' },
+    { key: 'damage', name: 'Урон', desc: 'больше урона' },
+    { key: 'maxHP', name: 'Макс. здоровье', desc: '+10 к здоровью' },
+    { key: 'secondPistol', name: 'Второй пистолет', desc: 'пистолет во второй руке' }
+];
 
-// Базовый класс для всех живых существ с анимацией ног
-class Creature extends PIXI.Graphics {
-    constructor() {
-        super();
-        this.legs = new PIXI.Graphics();
-        this.addChild(this.legs);
-        this.legAnimationPhase = Math.random() * Math.PI * 2;
+startBtn.onclick = () => {
+    document.getElementById('ui').style.display = 'none';
+    startGame();
+};
+restartBtn.onclick = () => {
+    endScreen.style.display = 'none';
+    startGame();
+};
+
+function showEndScreen() {
+    gameOver = true;
+    endScreen.style.display = 'block';
+}
+
+function showUpgradePopup() {
+    gamePaused = true;
+    upgradeButtons.innerHTML = '';
+    const available = allUpgrades.filter(u => u.key !== 'secondPistol' || !upgrades.secondPistol);
+    const opts = [];
+    const count = Math.min(4, available.length);
+    const arr = available.slice();
+    for (let i = 0; i < count; i++) {
+        const choice = arr.splice(Math.floor(Math.random() * arr.length), 1)[0];
+        opts.push(choice);
     }
+    for (let opt of opts) {
+        const btn = document.createElement('button');
+        btn.className = 'upgrade-btn';
+        btn.innerHTML = `${opt.name}<br><small>${opt.desc}</small>`;
+        btn.onclick = () => { applyUpgrade(opt.key); hideUpgradePopup(); };
+        upgradeButtons.appendChild(btn);
+    }
+    upgradePopup.style.display = 'flex';
+}
 
-    animateLegs(speed) {
-        this.legs.clear();
-        this.legs.beginFill(0x555555);
-        const legOffset = Math.sin(time * 0.2 + this.legAnimationPhase) * 5;
-        this.legs.drawCircle(-10, 15, 4 + legOffset * 0.5);
-        this.legs.drawCircle(10, 15, 4 - legOffset * 0.5);
-        this.legs.drawCircle(-10, -15, 4 - legOffset * 0.5);
-        this.legs.drawCircle(10, -15, 4 + legOffset * 0.5);
-        this.legs.endFill();
+function hideUpgradePopup() {
+    gamePaused = false;
+    upgradePopup.style.display = 'none';
+}
+
+function applyUpgrade(key) {
+    switch (key) {
+        case 'bulletCount':
+            upgrades.bulletCount = Math.min(3, upgrades.bulletCount + 1);
+            break;
+        case 'bulletSpeed':
+            upgrades.bulletSpeed *= 1.15;
+            break;
+        case 'fireRate':
+            upgrades.fireRate = Math.max(50, upgrades.fireRate * 0.9);
+            break;
+        case 'damage':
+            upgrades.damage += 5;
+            break;
+        case 'maxHP':
+            upgrades.maxHP += 10;
+            player.hp += 10;
+            break;
+        case 'secondPistol':
+            if (!upgrades.secondPistol) {
+                upgrades.secondPistol = true;
+                const gun2 = new PIXI.Graphics();
+                gun2.beginFill(0x777777);
+                gun2.drawRect(0, -3, player.gunLength, 6);
+                gun2.endFill();
+                gun2.position.set(-20, 0);
+                player.addChild(gun2);
+                player.leftGun = gun2;
+            }
+            break;
     }
 }
 
+// === Карта и игрок ===
+const worldWidth = 3000;
+const worldHeight = 3000;
 
-class Player extends Creature {
-    constructor() {
-        super();
-        this.body = new PIXI.Graphics();
-        this.gun = new PIXI.Graphics();
-        this.addChild(this.body, this.gun);
+const world = new PIXI.Container();
+app.stage.addChild(world);
 
-        this.drawBody();
-        this.drawGun();
-        
-        this.x = CONFIG.WORLD_WIDTH / 2;
-        this.y = CONFIG.WORLD_HEIGHT / 2;
-        this.hp = CONFIG.PLAYER_HEALTH;
-        this.maxHp = CONFIG.PLAYER_HEALTH;
-        this.recoil = 0;
+// Фон карты
+const background = new PIXI.Graphics();
+background.beginFill(0x555555);
+background.drawRect(0, 0, worldWidth, worldHeight);
+background.endFill();
+world.addChild(background);
+// сетка для лучшего ощущения движения
+const grid = new PIXI.Graphics();
+grid.lineStyle(1, 0x444444, 6);
+for (let x = 0; x <= worldWidth; x += 10) {
+    grid.moveTo(x, 0);
+    grid.lineTo(x, worldHeight);
+}
+for (let y = 0; y <= worldHeight; y += 10) {
+    grid.moveTo(0, y);
+    grid.lineTo(worldWidth, y);
+}
+world.addChild(grid);
+// видимая граница мира
+const border = new PIXI.Graphics();
+border.lineStyle(8, 0x222222);
+border.drawRect(0, 0, worldWidth, worldHeight);
+world.addChild(border);
+
+const player = new PIXI.Container();
+const playerBody = new PIXI.Graphics();
+playerBody.beginFill(0x00ff00);
+playerBody.drawCircle(0, 0, 20);
+playerBody.endFill();
+player.addChild(playerBody);
+// ноги (круги)
+const leftLeg = new PIXI.Graphics();
+leftLeg.beginFill(0x00aa00);
+leftLeg.drawCircle(-8, 24, 5);
+leftLeg.endFill();
+const rightLeg = new PIXI.Graphics();
+rightLeg.beginFill(0x00aa00);
+rightLeg.drawCircle(8, 24, 5);
+rightLeg.endFill();
+player.addChild(leftLeg);
+player.addChild(rightLeg);
+// руки (круги)
+const leftArm = new PIXI.Graphics();
+leftArm.beginFill(0x00aa00);
+leftArm.drawCircle(-18, 0, 5);
+leftArm.endFill();
+const rightArm = new PIXI.Graphics();
+rightArm.beginFill(0x00aa00);
+rightArm.drawCircle(18, 0, 5);
+rightArm.endFill();
+player.addChild(leftArm);
+player.addChild(rightArm);
+// глаза игрока
+const eye1 = new PIXI.Graphics();
+eye1.beginFill(0xffffff);
+eye1.drawCircle(-6, -6, 4);
+eye1.endFill();
+const eye2 = new PIXI.Graphics();
+eye2.beginFill(0xffffff);
+eye2.drawCircle(6, -6, 4);
+eye2.endFill();
+const pupil1 = new PIXI.Graphics();
+pupil1.beginFill(0x000000);
+pupil1.drawCircle(-6, -6, 2);
+pupil1.endFill();
+const pupil2 = new PIXI.Graphics();
+pupil2.beginFill(0x000000);
+pupil2.drawCircle(6, -6, 2);
+pupil2.endFill();
+player.addChild(eye1, eye2, pupil1, pupil2);
+// пистолет
+const gunLength = 20;
+const gun = new PIXI.Graphics();
+gun.beginFill(0x777777);
+gun.drawRect(0, -3, gunLength, 6);
+gun.endFill();
+gun.pivot.set(0, 0);
+gun.position.set(20, 0); // держим в руках
+player.addChild(gun);
+player.gun = gun;
+player.gunLength = gunLength;
+// полоска здоровья игрока
+const playerBarBg = new PIXI.Graphics();
+playerBarBg.beginFill(0x000000);
+playerBarBg.drawRect(-20, -34, 40, 6);
+playerBarBg.endFill();
+const playerBar = new PIXI.Graphics();
+playerBar.beginFill(0x00ff00);
+playerBar.drawRect(-20, -34, 40, 6);
+playerBar.endFill();
+player.addChild(playerBarBg);
+player.addChild(playerBar);
+player.hpBar = playerBar;
+const hpText = new PIXI.Text('100', {fontSize: 12, fill: 0xffffff});
+hpText.anchor.set(0.5);
+hpText.y = -38;
+player.addChild(hpText);
+player.hpText = hpText;
+const levelText = new PIXI.Text('Lv 1', {fontSize: 12, fill: 0xffffff});
+levelText.anchor.set(1, 0.5);
+levelText.position.set(-24, -31);
+player.addChild(levelText);
+player.levelText = levelText;
+player.x = worldWidth / 2;
+player.y = worldHeight / 2;
+player.hp = upgrades.maxHP;
+world.addChild(player);
+
+let target = { x: player.x, y: player.y };
+let enemies = [];
+let bullets = [];
+let coins = [];
+const SHOOT_RADIUS = 300;
+let squads = [];
+const playerSpeed = 0.9;
+const enemySpeed = 0.2;
+
+function shootBullet() {
+    if (enemies.length === 0) return;
+    // ищем ближайшего врага
+    let nearest = enemies[0];
+    let minDist = Infinity;
+    for (let e of enemies) {
+        const dx = e.x - player.x;
+        const dy = e.y - player.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < minDist) { minDist = d; nearest = e; }
     }
+    const dirX = nearest.x - player.x;
+    const dirY = nearest.y - player.y;
+    const dist = Math.sqrt(dirX * dirX + dirY * dirY);
+    if (dist === 0 || dist > SHOOT_RADIUS) return;
 
-    drawBody() {
-        this.body.clear();
-        this.body.beginFill(0x00ff00);
-        this.body.drawCircle(0, 0, 20);
-        this.body.endFill();
-    }
-
-    drawGun() {
-        this.gun.clear();
-        this.gun.beginFill(0x888888);
-        // Отдача отодвигает ствол назад
-        this.gun.drawRect(15 - this.recoil, -5, 20, 10);
-        this.gun.endFill();
-    }
-
-    update() {
-        // Анимация отдачи
-        if (this.recoil > 0) {
-            this.recoil -= 1;
-            this.drawGun();
+    const guns = [player.gun];
+    if (upgrades.secondPistol && player.leftGun) guns.push(player.leftGun);
+    for (const g of guns) {
+        const gunOffset = g.position.x + player.gunLength;
+        for (let i = 0; i < upgrades.bulletCount; i++) {
+            const bullet = new PIXI.Graphics();
+            bullet.beginFill(0xffff00);
+            bullet.drawCircle(0, 0, 5);
+            bullet.endFill();
+            const angle = g.rotation + (i - (upgrades.bulletCount - 1) / 2) * 0.2;
+            bullet.x = player.x + Math.cos(angle) * gunOffset;
+            bullet.y = player.y + Math.sin(angle) * gunOffset;
+            const speed = upgrades.bulletSpeed;
+            const bdx = Math.cos(angle);
+            const bdy = Math.sin(angle);
+            bullet.vx = bdx * speed;
+            bullet.vy = bdy * speed;
+            bullet.damage = upgrades.damage;
+            world.addChild(bullet);
+            bullets.push(bullet);
         }
-        // Анимация ног
-        this.animateLegs();
-    }
-
-    takeDamage(amount) {
-        this.hp -= amount;
-        healthBar.style.width = `${Math.max(0, this.hp / this.maxHp * 100)}%`;
-        showDamageFlash();
-        if (this.hp <= 0) {
-            endGame();
-        }
-    }
-    
-    shoot() {
-        const worldMousePos = app.renderer.plugins.interaction.mouse.getLocalPosition(world);
-        const bullet = new Bullet(this.x, this.y, worldMousePos);
-        bullets.push(bullet);
-        world.addChild(bullet);
-        this.recoil = 10; // Запускаем анимацию отдачи
     }
 }
 
-class Enemy extends Creature {
-    constructor() {
-        super();
-        const edge = Math.floor(Math.random() * 4);
-        const spawnX = Math.random() * CONFIG.WORLD_WIDTH;
-        const spawnY = Math.random() * CONFIG.WORLD_HEIGHT;
-        
-        this.x = spawnX;
-        this.y = spawnY;
-        this.hp = CONFIG.ENEMY_HEALTH;
-        this.animationOffset = Math.random() * 100; // Для уникальной анимации каждого врага
-    }
+let lastShot = 0;
 
-    update() {
-        const dx = player.x - this.x;
-        const dy = player.y - this.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 1) {
-            this.x += dx / dist * CONFIG.ENEMY_SPEED;
-            this.y += dy / dist * CONFIG.ENEMY_SPEED;
-        }
+// === Спавн врагов ===
+function createEnemy() {
+    const enemy = new PIXI.Container();
+    const body = new PIXI.Graphics();
+    body.beginFill(0xff0000);
+    body.drawCircle(0, 0, 18);
+    body.endFill();
+    enemy.addChild(body);
+    // глаза
+    const eye1 = new PIXI.Graphics();
+    eye1.beginFill(0xffffff);
+    eye1.drawCircle(-6, -6, 4);
+    eye1.endFill();
+    const eye2 = new PIXI.Graphics();
+    eye2.beginFill(0xffffff);
+    eye2.drawCircle(6, -6, 4);
+    eye2.endFill();
+    const pupil1 = new PIXI.Graphics();
+    pupil1.beginFill(0x000000);
+    pupil1.drawCircle(-6, -6, 2);
+    pupil1.endFill();
+    const pupil2 = new PIXI.Graphics();
+    pupil2.beginFill(0x000000);
+    pupil2.drawCircle(6, -6, 2);
+    pupil2.endFill();
+    enemy.addChild(eye1, eye2, pupil1, pupil2);
+    // руки и ноги
+    const leftArm = new PIXI.Graphics();
+    leftArm.beginFill(0xaa0000);
+    leftArm.drawRect(-26, -4, 8, 12);
+    leftArm.endFill();
+    const rightArm = new PIXI.Graphics();
+    rightArm.beginFill(0xaa0000);
+    rightArm.drawRect(18, -4, 8, 12);
+    rightArm.endFill();
+    const leftLeg = new PIXI.Graphics();
+    leftLeg.beginFill(0xaa0000);
+    leftLeg.drawRect(-12, 18, 6, 14);
+    leftLeg.endFill();
+    const rightLeg = new PIXI.Graphics();
+    rightLeg.beginFill(0xaa0000);
+    rightLeg.drawRect(6, 18, 6, 14);
+    rightLeg.endFill();
+    enemy.addChild(leftArm, rightArm, leftLeg, rightLeg);
 
-        // Анимация "дыхания"
-        const scale = 1 + Math.sin(time * 0.1 + this.animationOffset) * 0.05;
-        this.scale.set(scale);
-
-        this.draw();
-        this.animateLegs();
-    }
-    
-    draw() {
-        this.clear(); // Очищаем старую графику
-        this.beginFill(0xff0000);
-        this.drawCircle(0, 0, 18);
-        this.endFill();
-    }
+    enemy.maxHP = 20;
+    enemy.hp = enemy.maxHP;
+    const barBg = new PIXI.Graphics();
+    barBg.beginFill(0x000000);
+    barBg.drawRect(-18, -30, 36, 4);
+    barBg.endFill();
+    const bar = new PIXI.Graphics();
+    bar.beginFill(0xff0000);
+    bar.drawRect(-18, -30, 36, 4);
+    bar.endFill();
+    enemy.addChild(barBg);
+    enemy.addChild(bar);
+    enemy.hpBar = bar;
+    const hpText = new PIXI.Text(String(enemy.hp), {fontSize: 10, fill: 0xffffff});
+    hpText.anchor.set(0.5);
+    hpText.y = -32;
+    enemy.addChild(hpText);
+    enemy.hpText = hpText;
+    return enemy;
 }
 
-class Bullet extends PIXI.Graphics {
-    constructor(startX, startY, targetPos) {
-        super();
-        this.beginFill(0xffff00);
-        this.drawCircle(0, 0, 8);
-        this.endFill();
-        this.x = startX;
-        this.y = startY;
-
-        const dx = targetPos.x - startX;
-        const dy = targetPos.y - startY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        this.vx = (dx / dist) * CONFIG.BULLET_SPEED;
-        this.vy = (dy / dist) * CONFIG.BULLET_SPEED;
-    }
-
-    update() {
-        this.x += this.vx;
-        this.y += this.vy;
-    }
+function spawnCoin(x, y) {
+    const coin = new PIXI.Graphics();
+    coin.beginFill(0xffd700);
+    coin.drawCircle(0, 0, 8);
+    coin.endFill();
+    coin.x = x;
+    coin.y = y;
+    world.addChild(coin);
+    coins.push(coin);
 }
 
-// === Функции игры (остаются без изменений, кроме ticker) ===
-
-function createBackgroundGrid() {
-    const grid = new PIXI.Graphics();
-    grid.lineStyle(1, 0x333333, 1);
-    for (let i = 0; i < CONFIG.WORLD_WIDTH; i += 50) {
-        grid.moveTo(i, 0);
-        grid.lineTo(i, CONFIG.WORLD_HEIGHT);
-    }
-    for (let i = 0; i < CONFIG.WORLD_HEIGHT; i += 50) {
-        grid.moveTo(0, i);
-        grid.lineTo(CONFIG.WORLD_WIDTH, i);
-    }
-    return grid;
-}
-
-function startGame() {
-    gameIsOver = false;
-    score = 0;
-    time = 0;
-    
-    enemies.forEach(e => world.removeChild(e));
-    bullets.forEach(b => world.removeChild(b));
-    enemies = [];
-    bullets = [];
-
-    if (player) world.removeChild(player);
-    player = new Player();
-    world.addChild(player);
-    
-    updateScore(0);
-    healthBar.style.width = '100%';
-
-    startScreen.classList.add('hidden');
-    endScreen.classList.add('hidden');
-    hud.classList.remove('hidden');
-}
-
-function endGame() {
-    gameIsOver = true;
-    hud.classList.add('hidden');
-    endScreen.classList.remove('hidden');
-    finalScoreDisplay.textContent = `Ваш счет: ${score}`;
-}
-
-function spawnEnemy() {
-    const maxEnemies = CONFIG.MAX_ENEMIES_BASE + Math.floor(score / 100) * CONFIG.ENEMIES_PER_SCORE_TIER;
-    if (enemies.length < maxEnemies) {
-        const enemy = new Enemy();
+function spawnEnemyGroup() {
+    const count = Math.floor(Math.random() * 3) + 1;
+    const side = Math.floor(Math.random() * 4);
+    let x = 0, y = 0;
+    if (side === 0) { x = Math.random() * worldWidth; y = 0; }
+    else if (side === 1) { x = Math.random() * worldWidth; y = worldHeight; }
+    else if (side === 2) { x = 0; y = Math.random() * worldHeight; }
+    else { x = worldWidth; y = Math.random() * worldHeight; }
+    const squad = { x, y, members: [] };
+    for (let i = 0; i < count; i++) {
+        const enemy = createEnemy();
+        enemy.offsetX = (Math.random() - 0.5) * 40;
+        enemy.offsetY = (Math.random() - 0.5) * 40;
+        enemy.x = x + enemy.offsetX;
+        enemy.y = y + enemy.offsetY;
+        enemy.squad = squad;
+        squad.members.push(enemy);
         world.addChild(enemy);
         enemies.push(enemy);
     }
+    squads.push(squad);
 }
 
-function updateScore(points) {
-    score += points;
-    scoreDisplay.textContent = `Счет: ${score}`;
+setInterval(() => {
+    if (gameStarted && !gameOver && !gamePaused && enemies.length < 200) spawnEnemyGroup();
+}, 1500);
+
+// === Управление ===
+app.stage.interactive = true;
+app.stage.on('pointerdown', (e) => {
+    if (!gameStarted || gameOver) return;
+    target = getWorldPos(e.data.global);
+});
+app.stage.on('pointermove', (e) => {
+    if (!gameStarted || gameOver) return;
+    target = getWorldPos(e.data.global);
+});
+
+function getWorldPos(screenPos) {
+    return {
+        x: screenPos.x - world.x,
+        y: screenPos.y - world.y
+    };
 }
 
-function showDamageFlash() {
-    const flash = document.createElement('div');
-    flash.className = 'damage-flash';
-    document.body.appendChild(flash);
-    setTimeout(() => document.body.removeChild(flash), 200);
-}
+// === Основной цикл ===
+app.ticker.add(() => {
+    if (!gameStarted || gameOver || gamePaused) return;
 
-// === Основной игровой цикл ===
-app.ticker.add((delta) => {
-    if (gameIsOver) return;
-    
-    time += delta; // Обновляем глобальное время для анимаций
+    // авто-наведение пистолета на ближайшего зомби
+    if (enemies.length > 0) {
+        let nearest = enemies[0];
+        let minDist = Infinity;
+        for (let e of enemies) {
+            const dx = e.x - player.x;
+            const dy = e.y - player.y;
+            const d = Math.sqrt(dx * dx + dy * dy);
+            if (d < minDist) { minDist = d; nearest = e; }
+        }
+        const rot = Math.atan2(nearest.y - player.y, nearest.x - player.x);
+        player.gun.rotation = rot;
+        if (player.leftGun) player.leftGun.rotation = rot;
+    }
 
-    // --- Обновление объектов ---
-    player.update();
-    enemies.forEach(enemy => enemy.update());
-    bullets.forEach(bullet => bullet.update());
+    const now = performance.now();
+    if (now - lastShot > upgrades.fireRate) {
+        shootBullet();
+        lastShot = now;
+    }
 
-    // --- Проверка столкновений ---
+    // Движение игрока
+    const dx = target.x - player.x;
+    const dy = target.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 1) {
+        player.x += dx / dist * playerSpeed;
+        player.y += dy / dist * playerSpeed;
+    }
+
+    // Обновляем полоску и текст здоровья игрока
+    player.hpBar.scale.x = player.hp / upgrades.maxHP;
+    player.hpText.text = Math.round(player.hp);
+    player.levelText.text = `Lv ${upgrades.level}`;
+
+    // Камера
+    world.x = -player.x + app.screen.width / 2;
+    world.y = -player.y + app.screen.height / 2;
+    world.x = Math.min(0, Math.max(world.x, app.screen.width - worldWidth));
+    world.y = Math.min(0, Math.max(world.y, app.screen.height - worldHeight));
+
+    const padding = 100;
+    const minX = -world.x - padding;
+    const minY = -world.y - padding;
+    const maxX = -world.x + app.screen.width + padding;
+    const maxY = -world.y + app.screen.height + padding;
+
+    // Пули
     for (let i = bullets.length - 1; i >= 0; i--) {
-        const bullet = bullets[i];
-        let bulletHit = false;
-        for (let j = enemies.length - 1; j >= 0; j--) {
-            const enemy = enemies[j];
-            const dx = bullet.x - enemy.x;
-            const dy = bullet.y - enemy.y;
-            if (dx * dx + dy * dy < (18 * enemy.scale.x + 8) * (18 * enemy.scale.x + 8)) {
-                world.removeChild(enemy);
-                enemies.splice(j, 1);
-                bulletHit = true;
-                updateScore(10);
+        const b = bullets[i];
+        b.x += b.vx;
+        b.y += b.vy;
+
+        if (b.x < 0 || b.y < 0 || b.x > worldWidth || b.y > worldHeight) {
+            world.removeChild(b);
+            bullets.splice(i, 1);
+            continue;
+        }
+
+        // столкновение с врагами
+        for (let enemy of enemies) {
+            const bdx = enemy.x - b.x;
+            const bdy = enemy.y - b.y;
+            if (Math.sqrt(bdx * bdx + bdy * bdy) < 20) {
+                enemy.hp -= b.damage;
+                enemy.hpBar.scale.x = Math.max(0, enemy.hp / enemy.maxHP);
+                enemy.hpText.text = Math.max(0, Math.round(enemy.hp));
+                world.removeChild(b);
+                bullets.splice(i, 1);
                 break;
             }
         }
-        if (bulletHit || bullet.x < 0 || bullet.x > CONFIG.WORLD_WIDTH || bullet.y < 0 || bullet.y > CONFIG.WORLD_HEIGHT) {
-            world.removeChild(bullet);
-            bullets.splice(i, 1);
+    }
+
+    // Монеты
+    for (let i = coins.length - 1; i >= 0; i--) {
+        const c = coins[i];
+        const cdx = c.x - player.x;
+        const cdy = c.y - player.y;
+        if (Math.sqrt(cdx * cdx + cdy * cdy) < 25) {
+            world.removeChild(c);
+            coins.splice(i, 1);
+            coinCount++;
+            coinCounterEl.textContent = `Coins: ${coinCount}`;
         }
     }
 
-    for (let enemy of enemies) {
-        const dx = enemy.x - player.x;
-        const dy = enemy.y - player.y;
-        if (dx * dx + dy * dy < (20 + 18 * enemy.scale.x) * (20 + 18 * enemy.scale.x)) {
-            player.takeDamage(0.2 * delta);
+    // Враги идут к игроку группами
+    for (let squad of squads) {
+        const sdx = player.x - squad.x;
+        const sdy = player.y - squad.y;
+        const sdist = Math.sqrt(sdx * sdx + sdy * sdy);
+        if (sdist > 1) {
+            squad.x += sdx / sdist * enemySpeed;
+            squad.y += sdy / sdist * enemySpeed;
+        }
+        for (let enemy of squad.members) {
+            enemy.x = squad.x + enemy.offsetX;
+            enemy.y = squad.y + enemy.offsetY;
+            enemy.visible = enemy.x > minX && enemy.x < maxX && enemy.y > minY && enemy.y < maxY;
+
+            // Столкновение с игроком
+            const pdx = enemy.x - player.x;
+            const pdy = enemy.y - player.y;
+            if (Math.sqrt(pdx * pdx + pdy * pdy) < 40) {
+                const now = performance.now();
+                if (!player.lastHit || now - player.lastHit > 500) {
+                    player.hp -= 5;
+                    player.lastHit = now;
+                }
+            }
+
+            // смерть врага
+            if (enemy.hp <= 0) {
+                spawnCoin(enemy.x, enemy.y);
+                killCount++;
+                const newLevel = Math.min(100, Math.floor(killCount / 50) + 1);
+                if (newLevel > upgrades.level && upgrades.level < 100) {
+                    upgrades.level = newLevel;
+                    showUpgradePopup();
+                }
+                world.removeChild(enemy);
+                enemies.splice(enemies.indexOf(enemy), 1);
+                squad.members.splice(squad.members.indexOf(enemy), 1);
+            }
         }
     }
+    squads = squads.filter(s => s.members.length > 0);
 
-    // --- Камера и поворот игрока ---
-    world.pivot.x = player.x;
-    world.pivot.y = player.y;
-    world.x = app.screen.width / 2;
-    world.y = app.screen.height / 2;
-    
-    const worldMousePos = app.renderer.plugins.interaction.mouse.getLocalPosition(world);
-    player.rotation = Math.atan2(worldMousePos.y - player.y, worldMousePos.x - player.x);
+    if (player.hp <= 0) {
+        showEndScreen();
+    }
 });
 
-// === Инициализация мира и событий ===
-function init() {
-    world = new PIXI.Container();
-    app.stage.addChild(world);
-    
-    backgroundGrid = createBackgroundGrid();
-    world.addChild(backgroundGrid);
-    
-    setInterval(() => {
-        if (!gameIsOver) spawnEnemy();
-    }, 1000);
+// === Начало игры ===
+function startGame() {
+    gameStarted = true;
+    gameOver = false;
+    gamePaused = false;
+    upgrades.level = 1;
+    upgrades.bulletCount = 1;
+    upgrades.bulletSpeed = 8;
+    upgrades.fireRate = 500;
+    upgrades.damage = 10;
+    upgrades.maxHP = 100;
+    upgrades.secondPistol = false;
+    killCount = 0;
+    coinCount = 0;
+    coinCounterEl.textContent = 'Coins: 0';
+    upgradePopup.style.display = 'none';
+    lastShot = 0;
+    player.hp = upgrades.maxHP;
+    if (player.leftGun) { player.removeChild(player.leftGun); player.leftGun = null; }
+    player.x = worldWidth / 2;
+    player.y = worldHeight / 2;
+    target = { x: player.x, y: player.y };
+    player.hpBar.scale.x = 1;
+    player.hpText.text = upgrades.maxHP;
+    player.levelText.text = `Lv ${upgrades.level}`;
 
-    startBtn.onclick = startGame;
-    restartBtn.onclick = startGame;
-    
-    app.stage.interactive = true;
-    app.stage.on('pointerdown', () => {
-        if (!gameIsOver) {
-            player.shoot();
-        }
-    });
+    for (let e of enemies) world.removeChild(e);
+    enemies = [];
+    for (let b of bullets) world.removeChild(b);
+    bullets = [];
+    for (let c of coins) world.removeChild(c);
+    coins = [];
+    squads = [];
+
+    spawnEnemyGroup();
 }
-
-init();
